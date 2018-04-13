@@ -31,9 +31,10 @@ if sys.version_info < (3,4):
 import select
 import time
 from logging import getLogger
-from math import atan2, degrees as math_degrees, hypot
+from math import atan2, degrees as math_degrees, hypot, pi
 from os.path import abspath
 from ev3dev2 import get_current_platform, Device, list_device_names
+#from ev3dev.unit import distance_in_mm
 
 log = getLogger(__name__)
 
@@ -477,7 +478,7 @@ class Motor(Device):
         """
         Writing specifies the target position for the `run-to-abs-pos` and `run-to-rel-pos`
         commands. Reading returns the current value. Units are in tacho counts. You
-        can use the value returned by `count_per_rot` to convert tacho counts to/from
+        can use the value returned by `counts_per_rot` to convert tacho counts to/from
         rotations or degrees.
         """
         self._position_sp, value = self.get_attr_int(self._position_sp, 'position_sp')
@@ -808,6 +809,7 @@ class Motor(Device):
         """
         return self.wait(lambda state: s not in state, timeout)
 
+    # dwalton baseline _speed_pct in the Motor class
     def _speed_pct(self, speed_pct):
 
         # If speed_pct is SpeedInteger object we must convert
@@ -858,7 +860,7 @@ class Motor(Device):
         if not speed_pct or not rotations:
             log.warning("%s speed_pct is %s but rotations is %s, motor will not move" % (self, speed_pct, rotations))
             self._set_brake(brake)
-            return
+            return False
 
         self.speed_sp = int((speed_pct * self.max_speed) / 100)
         self._set_position_rotations(speed_pct, rotations)
@@ -868,6 +870,8 @@ class Motor(Device):
         if block:
             self.wait_until('running', timeout=WAIT_RUNNING_TIMEOUT)
             self.wait_until_not_moving()
+
+        return True
 
     def on_for_degrees(self, speed_pct, degrees, brake=True, block=True):
         """
@@ -881,7 +885,7 @@ class Motor(Device):
         if not speed_pct or not degrees:
             log.warning("%s speed_pct is %s but degrees is %s, motor will not move" % (self, speed_pct, degrees))
             self._set_brake(brake)
-            return
+            return False
 
         self.speed_sp = int((speed_pct * self.max_speed) / 100)
         self._set_position_degrees(speed_pct, degrees)
@@ -891,6 +895,8 @@ class Motor(Device):
         if block:
             self.wait_until('running', timeout=WAIT_RUNNING_TIMEOUT)
             self.wait_until_not_moving()
+
+        return True
 
     def on_to_position(self, speed_pct, position, brake=True, block=True):
         """
@@ -904,7 +910,7 @@ class Motor(Device):
         if not speed_pct:
             log.warning("%s speed_pct is %s, motor will not move" % (self, speed_pct))
             self._set_brake(brake)
-            return
+            return False
 
         self.speed_sp = int((speed_pct * self.max_speed) / 100)
         self.position_sp = position
@@ -914,6 +920,8 @@ class Motor(Device):
         if block:
             self.wait_until('running', timeout=WAIT_RUNNING_TIMEOUT)
             self.wait_until_not_moving()
+
+        return True
 
     def on_for_seconds(self, speed_pct, seconds, brake=True, block=True):
         """
@@ -927,7 +935,7 @@ class Motor(Device):
         if not speed_pct or not seconds:
             log.warning("%s speed_pct is %s but seconds is %s, motor will not move" % (self, speed_pct, seconds))
             self._set_brake(brake)
-            return
+            return False
 
         self.speed_sp = int((speed_pct * self.max_speed) / 100)
         self.time_sp = int(seconds * 1000)
@@ -937,6 +945,8 @@ class Motor(Device):
         if block:
             self.wait_until('running', timeout=WAIT_RUNNING_TIMEOUT)
             self.wait_until_not_moving()
+
+        return True
 
     def on(self, speed_pct, brake=True, block=False):
         """
@@ -953,7 +963,7 @@ class Motor(Device):
         if not speed_pct:
             log.warning("%s speed_pct is %s, motor will not move" % (self, speed_pct))
             self._set_brake(brake)
-            return
+            return False
 
         self.speed_sp = int((speed_pct * self.max_speed) / 100)
         self._set_brake(brake)
@@ -962,6 +972,8 @@ class Motor(Device):
         if block:
             self.wait_until('running', timeout=WAIT_RUNNING_TIMEOUT)
             self.wait_until_not_moving()
+
+        return True
 
     def off(self, brake=True):
         self._set_brake(brake)
@@ -1713,6 +1725,11 @@ class MoveTank(MotorSet):
         self.right_motor._set_position_rotations(right_speed, right_rotations)
         self.right_motor._set_brake(brake)
 
+        log.debug("%s: on_for_rotations at left-speed %s, rotations %s, left-position %d->%d" %
+            (self, left_speed, rotations, self.left_motor.position, self.left_motor.position_sp))
+        log.debug("%s: on_for_rotations at right-speed %s, rotations %s, right-position %d->%d" %
+            (self, right_speed, rotations, self.right_motor.position, self.right_motor.position_sp))
+
         # Start the motors
         self.left_motor.run_to_abs_pos()
         self.right_motor.run_to_abs_pos()
@@ -1743,6 +1760,11 @@ class MoveTank(MotorSet):
         self.right_motor._set_position_degrees(right_speed, right_degrees)
         self.right_motor._set_brake(brake)
 
+        log.debug("%s: on_for_degrees at left-speed %s, left-degrees %s, left-position %d->%d" %
+            (self, left_speed, left_degrees, self.left_motor.position, self.left_motor.position_sp))
+        log.debug("%s: on_for_degrees at right-speed %s, right-degrees %s, right-position %d->%d" %
+            (self, right_speed, right_degrees, self.right_motor.position, self.right_motor.position_sp))
+
         # Start the motors
         self.left_motor.run_to_abs_pos()
         self.right_motor.run_to_abs_pos()
@@ -1764,6 +1786,9 @@ class MoveTank(MotorSet):
         self.right_motor.time_sp = int(seconds * 1000)
         self.right_motor._set_brake(brake)
 
+        log.debug("%s: on_for_seconds %ss at left-speed %s, right-speed %s" %
+            (self, seconds, left_speed_pct, right_speed_pct))
+
         # Start the motors
         self.left_motor.run_timed()
         self.right_motor.run_timed()
@@ -1778,6 +1803,9 @@ class MoveTank(MotorSet):
         self._validate_speed_pct(left_speed_pct, right_speed_pct)
         self.left_motor.speed_sp = int((left_speed_pct * self.max_speed) / 100)
         self.right_motor.speed_sp = int((right_speed_pct * self.max_speed) / 100)
+
+        log.debug("%s: on at left-speed %s, right-speed %s" %
+            (self, left_speed_pct, right_speed_pct))
 
         # Start the motors
         self.left_motor.run_forever()
@@ -1846,6 +1874,129 @@ class MoveSteering(MoveTank):
     def on(self, steering, speed_pct):
         (left_speed_pct, right_speed_pct) = self.get_speed_steering(steering, speed_pct)
         MoveTank.on(self, left_speed_pct, right_speed_pct)
+
+
+class MoveDifferential(MoveTank):
+    """
+    For all methods speed_pct can be an integer or a SpeedInteger object
+    TODO think about how to do something similar for 'distance'
+    """
+
+    def __init__(self, left_motor_port, right_motor_port, wheel_class, wheel_distance_mm, desc=None, motor_class=LargeMotor):
+        MoveTank.__init__(self, left_motor_port, right_motor_port, desc, motor_class)
+        self.wheel = wheel_class()
+
+        # The distance between the mid point of the wheels
+        self.wheel_distance_mm = wheel_distance_mm
+
+        # The circumference of the circle made if this robot were to rotate in place
+        self.circumference_mm = self.wheel_distance_mm * pi
+
+        self.min_circle_radius_mm = self.wheel_distance_mm / 2
+
+    def on_for_distance(self, distance_mm, speed_pct=100, brake=True, block=True):
+        """
+        Drive forward distance_mm
+        """
+
+        if not distance_mm or not speed_pct:
+            log.warning("%s robot will not move (distance_mm %s, speed_pct %s)" % (self, distance_mm, speed_pct))
+            return False
+
+        rotations = distance_mm / self.wheel.circumference_mm
+        log.debug("%s: on_for_rotations distance_mm %s, rotations %s, speed %s" % (self, distance_mm, rotations, speed_pct))
+
+        MoveTank.on_for_rotations(self, speed_pct, speed_pct, rotations, brake, block)
+        return True
+
+    # Distance here could be
+    # - percentage of the circle to drive
+    # - mm, cm, in, etc of the circle to drive
+    def on_arc_right(self, distance_mm, radius_mm, speed_pct=100, brake=True, block=True):
+        """
+        Drive clockwise in a circle with 'radius' for 'distance'
+        """
+
+        if not radius_mm or not speed_pct:
+            log.warning("%s robot will not move (radius %s, speed_pct %s)" % (self, radius, speed_pct))
+            return False
+
+        assert radius_mm > 0, "radius is %s, a circle's radius must be greater than 0" % radius_mm
+        assert radius_mm >= self.min_circle_radius_mm, "radius is %s, the smallest radius we can make is %s" % (radius_mm, self.min_circle_radius_mm)
+
+        # The circle formed at the halfway point between the two wheels is the
+        # circle that must have a radius of radius_mm
+        circle_outer_mm = 2 * pi * (radius_mm + (self.wheel_distance_mm / 2))
+        circle_middle_mm = 2 * pi * radius_mm
+        circle_inner_mm = 2 * pi * (radius_mm - (self.wheel_distance_mm / 2))
+
+        # The left wheel is making the larger circle and will move at speed_pct
+        # The right wheel is making a smaller circle so its speed will be a fraction of the left motor's speed
+        # dwalton
+        left_speed_pct = self.left_motor._speed_pct(speed_pct)
+        right_speed_pct = (circle_inner_mm/circle_outer_mm) * left_speed_pct
+
+        log.debug("%s: on_arc_right radius %s, left-speed %s, right-speed %s, circle_outer_mm %s, circle_middle_mm %s, circle_inner_mm %s" %
+            (self, radius_mm, left_speed_pct, right_speed_pct, circle_outer_mm, circle_middle_mm, circle_inner_mm))
+
+        if distance_mm is None:
+            MoveTank.on(self, left_speed_pct, right_speed_pct, brake, block)
+        else:
+            # The left motor is making the larger circle
+            # What percentage of circle_outer_mm does the left wheel need to travel?
+            circle_middle_percentage = distance_mm / circle_middle_mm
+            circle_outer_distance_mm = circle_middle_percentage * circle_outer_mm
+
+            left_rotations = circle_outer_distance_mm / self.wheel.circumference_mm
+
+            log.debug("%s: circle_middle_percentage %s, circle_outer_distance_mm %s, left_rotations %s" %
+                (self, circle_middle_percentage, circle_outer_distance_mm, left_rotations))
+            MoveTank.on_for_rotations(self, left_speed_pct, right_speed_pct, left_rotations, brake, block)
+
+        return True
+
+    def on_arc_left(self, distance, radius, speed_pct=100, brake=True, block=True):
+        """
+        Drive counter-clockwise in a circle with radius_mm
+        """
+
+        if not radius_mm:
+            return
+
+    def _turn(self, degrees, speed_pct=100, brake=True, block=True):
+        """
+        Rotate in place 'degrees'. Both wheels must turn at the same speed for us
+        to rotate in place.
+        """
+
+        if not degrees or not speed_pct:
+            log.warning("%s robot will not move (degrees %s, speed_pct %s)" % (self, degrees, speed_pct))
+            return False
+
+        # The distance each wheel needs to travel
+        distance_mm = (abs(degrees) / 360) * self.circumference_mm
+
+        # The number of rotations to move distance_mm
+        rotations = distance_mm/self.wheel.circumference_mm
+
+        log.debug("%s: turn() degrees %s, distance_mm %s, rotations %s, degrees %s" % (self, degrees, distance_mm, rotations, degrees))
+
+        # If degrees is positive rotate clockwise
+        if degrees > 0:
+            MoveTank.on_for_rotations(self, speed_pct, speed_pct * -1, rotations, brake, block)
+
+        # If degrees is negative rotate counter-clockwise
+        else:
+            rotations = distance_mm / self.wheel.circumference_mm
+            MoveTank.on_for_rotations(self, speed_pct * -1, speed_pct, rotations, brake, block)
+
+        return True
+
+    def turn_right(self, degrees, speed_pct=100, brake=True, block=True):
+        return self._turn(abs(degrees), speed_pct, brake, block)
+
+    def turn_left(self, degrees, speed_pct=100, brake=True, block=True):
+        return self._turn(abs(degrees) * -1, speed_pct, brake, block)
 
 
 class MoveJoystick(MoveTank):
